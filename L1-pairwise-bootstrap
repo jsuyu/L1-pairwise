@@ -1,0 +1,122 @@
+library("ADMM")      #metodologia per determinar optimitzar Lasso
+library("coda.base") #paquet de coordenades composicionals
+library("matrixStats")#rowQuantile
+library("ggplot2")
+library("dplyr")
+
+#---------------------------------------------------------------------------------------
+set.seed(333)
+#carregem la matriu de dades
+GEMAS<-read.csv("GEMAS.csv",sep=',')
+ilr_gemas<-read.csv("ilr_gemas.csv",sep=';')
+sel<-c("SiO2","TiO2","Al2O3","Fe2O3","MnO","MgO","CaO","Na2O","K2O","P2O5","LOI")
+ilr<-c("ilr1","ilr2","ilr3","ilr4","ilr5","ilr6","ilr7","ilr8","ilr9","ilr10")
+x<-GEMAS
+#zero replacement
+#x[x==0]<-1
+# nomes algunes de les columnes que usen en el paper
+x<-x[,c("sand","silt","clay","AnnPrec","pH_CaCl2","PM","SiO2","TiO2","Al2O3", "Fe2O3",
+        "MnO","MgO","CaO","Na2O","K2O","P2O5","LOI")]
+# mirem quantes i quines files tenen NA
+which(apply(is.na(x),1,sum)>0)#191 308 445 568 592 937
+# mirem quantes i quines files tenen zeros
+which(apply((x==0),1,sum)>0)#138 1100 1218 1548 1634 1988
+#
+### ELIMINEM files amb NA i ZEROS
+#carreguem la variable resposta
+y<-as.matrix(GEMAS[,"pH_CaCl2"])
+elim<-!((apply(is.na(x),1,sum)>0)|(apply((x==0),1,sum)>0))
+y<-y[elim]
+x<-x[elim,]
+
+x<-as.matrix(x[,sel])
+#---------------------------------------------------------------------------------------
+#passem a coordenades olr la matriu de dades
+n<-nrow(x)                            #n=nombre de individus de la composició
+D<-ncol(x)                            #D=nombre de parts de la composició
+#fixem la SBP and olr
+psi<-sbp_basis(matrix(c(-1,-1,1, -1,-1,-1,-1,-1,-1,-1,-1,
+                        -1,-1,0, 1,-1,-1,-1,-1,-1,-1,-1,
+                        0,0,0,0,1,0,0,0,-1,0,0,
+                        -1,-1,0,0,1,-1,-1,-1,1,-1,-1,
+                        1,-1,0,0,0,0,0,0,0,0,0,
+                        1,1,0,0,0,-1,-1,-1,0,-1,-1,
+                        0,0,0,0,0,0,1,-1,0,0,0,
+                        0,0,0,0,0,1,0,0,0,-1,0,
+                        0,0,0,0,0,1,0,0,0,1,-1,
+                        0,0,0,0,0,-1,1,1,0,-1,-1),D,D-1))
+olr_x<-coordinates(x,psi)
+#lambda fixada
+lambda=42.84443
+#lambda=200
+#---------------------------------------------------------------------------------------
+#constuion la matriu G que ens defineix la mètrica L1-pairwise
+G<-matrix(0,(D-1)*(D)/2,D)            #inicialitzem la matiu G
+colini<-as.vector(1:(D-1))            #columna on comença cada submatriu
+dimsub<-as.vector((D-1):1)            #dimensió de cada submatriu
+rowini<-as.vector(rep(1,D-1))         #fila on comença cada submatriu
+for (i in 2:(D-1)){
+  rowini[i]=rowini[i-1]+dimsub[i-1]
+}
+#emplenem la matiu G
+for(i in 1:(D-1)){
+  G[rowini[i]:(rowini[i]+dimsub[i]-1),(colini[i]+1):D]<--diag(dimsub[i])
+  G[rowini[i]:(rowini[i]+dimsub[i]-1),colini[i]]<-1
+}
+G<-1/(D-1)*G
+Gpsi<-G%*%psi                       #matriu que cal aplicar en coordenades olr per tenir la mètrica L1-pairwise
+
+#---------------------------------------------------------------------------------------
+# solve LASSO via reducing from Generalized LASSO
+# Diagonal = diag(D-1) # matriu Identitat si volem fer LASSO
+A = olr_x
+A<-cbind(rep(1,n),A) #afegim el terme independent del model lineal
+psi<-cbind(rep(0,D),psi) #eliminem el terme independent del model lineal
+Gpsi<-cbind(rep(0,D*(D-1)/2),Gpsi) #eliminem el terme independent del model lineal
+theta<-0.5
+enetGpsi<-rbind(theta*Gpsi,(1-theta)*psi)
+b = y
+
+output  = admm.genlasso(A,b,enetGpsi,lambda=lambda, 
+                        rho=1.0, 
+                        alpha=1.0,
+                        abstol=1e-12, 
+                        reltol=1e-12, 
+                        maxiter=5000000)
+output$x
+as.matrix(psi%*%output$x)
+#bootstrap
+llista<-list()
+data<-cbind(b,A)
+n=1000
+for(i in 1:n){
+  sample.data <- data[sample(1:nrow(data), nrow(data), replace = TRUE),]
+  A<-sample.data[,-1]
+  b<-sample.data[,1]
+  model_bootstrap<-admm.genlasso(A,b,Gpsi,lambda=lambda, 
+                                 rho=1.0, 
+                                 alpha=1.0,
+                                 abstol=1e-12, 
+                                 reltol=1e-12, 
+                                 maxiter=5000000)
+  llista[[i]]=list(model_bootstrap$x)
+}
+boot<-matrix(unlist(llista), ncol=11, byrow=TRUE)
+boot<-boot[,-1]
+boxplot.matrix(boot,main=bquote(~lambda==.(lambda)))
+boxplot.matrix(as.matrix(boot[,5]))
+max(boot[,5])
+sum(boot[,5]>0)
+quantils<-as.matrix(colQuantiles(boot, probs = c(0.025, 0.5, 0.975)))
+data<-as.data.frame(cbind(1:10,quantils))
+data<-data[c(1,2,3,4,5,6,7,8,9,10),]
+data<-data[,-1]
+data<-cbind(1:10,data)
+colnames(data)<-c("olr","lower","med","upper")
+ggplot(data, aes(olr, med)) +        # ggplot2 plot with confidence intervals
+  scale_x_continuous(breaks=seq(0,10,1))+
+  geom_point() +
+  geom_errorbar(aes(ymin = lower, ymax = upper))+
+  geom_hline(yintercept=0,color="red")+
+  labs(x=expression("olr"[psi](beta)),
+       y="95% percentile interval")
