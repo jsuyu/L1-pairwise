@@ -3,48 +3,16 @@ library("coda.base") #paquet de coordenades composicionals
 library("dplyr")
 
 #---------------------------------------------------------------------------------------
-set.seed(333)
-#carregem la matriu de dades
-GEMAS<-read.csv("GEMAS.csv",sep=',')
-ilr_gemas<-read.csv("ilr_gemas.csv",sep=';')
-sel<-c("SiO2","TiO2","Al2O3","Fe2O3","MnO","MgO","CaO","Na2O","K2O","P2O5","LOI")
-ilr<-c("ilr1","ilr2","ilr3","ilr4","ilr5","ilr6","ilr7","ilr8","ilr9","ilr10")
-x<-GEMAS
-#zero replacement
-#x[x==0]<-1
-# nomes algunes de les columnes que usen en el paper
-x<-x[,c("sand","silt","clay","AnnPrec","pH_CaCl2","PM","SiO2","TiO2","Al2O3", "Fe2O3",
-        "MnO","MgO","CaO","Na2O","K2O","P2O5","LOI")]
-# mirem quantes i quines files tenen NA
-which(apply(is.na(x),1,sum)>0)#191 308 445 568 592 937
-# mirem quantes i quines files tenen zeros
-which(apply((x==0),1,sum)>0)#138 1100 1218 1548 1634 1988
-#
-### ELIMINEM files amb NA i ZEROS
-#carreguem la variable resposta
-y<-as.matrix(GEMAS[,"pH_CaCl2"])
-elim<-!((apply(is.na(x),1,sum)>0)|(apply((x==0),1,sum)>0))
-y<-y[elim]
-x<-x[elim,]
 
-x<-as.matrix(x[,sel])
+y<-responseY
+x<-CoDacovariableData
+
 #---------------------------------------------------------------------------------------
 #passem a coordenades olr la matriu de dades
-n<-nrow(x)                            #n=nombre de individus de la composiciÃ³
-D<-ncol(x)                            #D=nombre de parts de la composiciÃ³
+n<-nrow(x)                            #n=nombre de individus de la composicio
+D<-ncol(x)                            #D=nombre de parts de la composicio
 #tenim tres bases olr
-psi<-sbp_basis(as.matrix(ilr_gemas[,ilr]))
 psi<-ilr_basis(D)
-psi<-sbp_basis(matrix(c(1,-1,0,0,0,0,0,0,0,0,0,
-                        1,1,-1,0,0,0,0,0,0,0,0,
-                        1,1,1,-1,0,0,0,0,0,0,0,
-                        0,0,0,0,1,0,0,0,-1,0,0,
-                        -1,-1,-1,-1,1,0,0,0,1,0,0,
-                        -1,-1,-1,-1,-1,1,1,1,-1,1,1,
-                        0,0,0,0,0,0,1,-1,0,0,0,
-                        0,0,0,0,0,1,0,0,0,-1,0,
-                        0,0,0,0,0,1,0,0,0,1,-1,
-                        0,0,0,0,0,-1,1,1,0,-1,-1),D,D-1))
 olr_x<-coordinates(x,psi)
 
 #---------------------------------------------------------------------------------------
@@ -71,8 +39,6 @@ A = olr_x
 A<-cbind(rep(1,n),A) #afegim el terme independent del model lineal
 psi<-cbind(rep(0,D),psi) #eliminem el terme independent del model lineal
 Gpsi<-cbind(rep(0,D*(D-1)/2),Gpsi) #eliminem el terme independent del model lineal
-theta<-0.5
-enetGpsi<-rbind(theta*Gpsi,(1-theta)*psi)
 b = y
 llista=list() #llista on guardarem les lambdes i parÃ metres beta
 
